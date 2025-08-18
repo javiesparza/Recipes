@@ -7,6 +7,9 @@ import base64
 from bs4 import BeautifulSoup
 import google.generativeai as genai
 import logging
+import smtplib, ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 logging.basicConfig(level=logging.INFO)
 
@@ -126,9 +129,10 @@ def prompt_gemini(ingredient_list):
     prompt = f"""
     Given the following list of ingredients, please create a meal plan for 4-6 dinners 
     this week. The plan should be a mix of quick weeknight meals and more involved weekend 
-    recipes. Please make sure to include a variety of cuisines, 
-    and suggest additional staple ingredients I need to use and might need to purchase.
-    Assume I have staples.
+    recipes. For each recipe, provide the title, ingredients, and instructions. Format the 
+    entire response as a single, valid HTML string. Please use <h1> for the overall meal 
+    plan title, <h2> for each recipe title, an unordered list (<ul>) with <li> tags for 
+    ingredients, and an ordered list (<ol>) with <li> tags for instructions.
      
     Ingredients:  {', '.join(ingredient_list)}
     """
@@ -148,6 +152,28 @@ def prompt_gemini(ingredient_list):
         except Exception:
              pass # Ignore if feedback isn't available
         return "Error: Could not generate AI suggestion due to an internal error."
+    
+def send_email(to_email, subject, body_html):
+    context = ssl.create_default_context()
+
+    message = MIMEMultipart("alternative")
+    message["Subject"] = subject
+    message["From"] = GMAIL_USER
+    message["To"] = to_email
+
+    part1 = MIMEText(body_html, "html")
+    message.attach(part1)
+    
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+            server.login(GMAIL_USER, APP_PASSWORD)
+            server.sendmail(
+                GMAIL_USER, to_email, message.as_string()
+            )
+            print("Email sent successfully!")
+            
+    except Exception as e:
+        print(f"Error sending email: {e}")
 
 def main():
     email_html = get_misfits_market_email_imap()
@@ -164,6 +190,9 @@ def main():
     if not recipes:
         print("Failed to generate recipes.")
         return
+
+    send_email(GMAIL_USER, "Weekly Recipe Suggestions", recipes)
+
 
 if __name__ == '__main__':
     main()
