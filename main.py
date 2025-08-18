@@ -5,9 +5,30 @@ from email.header import decode_header
 from dotenv import load_dotenv
 import base64
 from bs4 import BeautifulSoup
+import google.generativeai as genai
+import logging
 
+logging.basicConfig(level=logging.INFO)
 
 load_dotenv()
+
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+if not GOOGLE_API_KEY:
+    logging.error("GOOGLE_API_KEY not found in environment variables. Gemini features will be disabled.")
+
+# Gemini AI Setup
+gemini_model = None
+if GOOGLE_API_KEY:
+    try:
+        genai.configure(api_key=GOOGLE_API_KEY)
+        # 'gemini-2.0-flash-lite' is the free model name for Gemini
+        gemini_model = genai.GenerativeModel('gemini-2.0-flash-lite')
+        logging.info("Gemini AI Model configured successfully with 'gemini-2.0-flash-lite'.")
+    except Exception as e:
+        logging.error(f"Error configuring Gemini AI: {e}. Gemini features will be disabled.")
+        gemini_model = None
+else:
+    logging.warning("GOOGLE_API_KEY is missing. Gemini features are disabled.")
 
 # Replace these with your Gmail address and the App Password you generated
 GMAIL_USER = os.getenv('GMAIL_USER')
@@ -97,6 +118,36 @@ def parse_ingredients(html_content):
                         ingredients.append(ingredient)
     return ingredients
 
+def prompt_gemini(ingredient_list):
+    if not gemini_model:
+        logging.warning("Gemini model is not available.")
+        return
+    
+    prompt = f"""
+    Given the following list of ingredients, please create a meal plan for 4-6 dinners 
+    this week. The plan should be a mix of quick weeknight meals and more involved weekend 
+    recipes. Please make sure to include a variety of cuisines, 
+    and suggest additional staple ingredients I need to use and might need to purchase.
+    Assume I have staples.
+     
+    Ingredients:  {', '.join(ingredient_list)}
+    """
+
+    try:
+        response = gemini_model.generate_content(prompt)
+
+        recipes = response.text.strip()
+        return recipes
+
+
+    except Exception as e:
+        logging.error(f"Error generating recipes with Gemini: {e}")
+        try:
+            # Attempt to get feedback if the error occurred after the API call
+             logging.error(f"Gemini prompt feedback: {response.prompt_feedback}")
+        except Exception:
+             pass # Ignore if feedback isn't available
+        return "Error: Could not generate AI suggestion due to an internal error."
 
 def main():
     email_html = get_misfits_market_email_imap()
@@ -105,13 +156,14 @@ def main():
         return
 
     ingredient_list = parse_ingredients(email_html)
-    if ingredient_list.empty:
+    if len(ingredient_list) == 0:
         print("No ingredients found.")
         return
-    
 
+    recipes = prompt_gemini(ingredient_list)
+    if not recipes:
+        print("Failed to generate recipes.")
+        return
 
-
-# --- Main Script Execution ---
 if __name__ == '__main__':
     main()
