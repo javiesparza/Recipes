@@ -5,7 +5,7 @@ from email.header import decode_header
 from dotenv import load_dotenv
 import base64
 from bs4 import BeautifulSoup
-import google.generativeai as genai
+import anthropic
 import logging
 import smtplib, ssl
 from email.mime.text import MIMEText
@@ -15,23 +15,20 @@ logging.basicConfig(level=logging.INFO)
 
 load_dotenv()
 
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-if not GOOGLE_API_KEY:
-    logging.error("GOOGLE_API_KEY not found in environment variables. Gemini features will be disabled.")
+ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
+if not ANTHROPIC_API_KEY:
+    logging.error("ANTHROPIC_API_KEY not found in environment variables.")
 
-# Gemini AI Setup
-gemini_model = None
-if GOOGLE_API_KEY:
+# Claude AI Setup
+claude_client = None
+if ANTHROPIC_API_KEY:
     try:
-        genai.configure(api_key=GOOGLE_API_KEY)
-        # 'gemini-2.0-flash-lite' is the free model name for Gemini
-        gemini_model = genai.GenerativeModel('gemini-2.0-flash-lite')
-        logging.info("Gemini AI Model configured successfully with 'gemini-2.0-flash-lite'.")
+        claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        logging.info("Claude AI client configured successfully.")
     except Exception as e:
-        logging.error(f"Error configuring Gemini AI: {e}. Gemini features will be disabled.")
-        gemini_model = None
+        logging.error(f"Error configuring Claude AI: {e}.")
 else:
-    logging.warning("GOOGLE_API_KEY is missing. Gemini features are disabled.")
+    logging.warning("ANTHROPIC_API_KEY is missing. AI features are disabled.")
 
 # Replace these with your Gmail address and the App Password you generated
 GMAIL_USER = os.getenv('GMAIL_USER')
@@ -122,35 +119,35 @@ def parse_ingredients(html_content):
     return ingredients
 
 def prompt_gemini(ingredient_list):
-    if not gemini_model:
-        logging.warning("Gemini model is not available.")
+    if not claude_client:
+        logging.warning("Claude client is not available.")
         return
-    
+
     prompt = f"""
-    Given the following list of ingredients, please create a meal plan for 4-6 dinners 
-    this week. The plan should be a mix of quick weeknight meals and more involved weekend 
-    recipes. For each recipe, provide the title, ingredients, and instructions. Format the 
-    entire response as a single, valid HTML string. Please use <h1> for the overall meal 
-    plan title, <h2> for each recipe title, an unordered list (<ul>) with <li> tags for 
+    Given the following list of ingredients, please create a meal plan for 4-6 dinners
+    this week. The plan should be a mix of quick weeknight meals and more involved weekend
+    recipes. For each recipe, provide the title, ingredients, and instructions. Format the
+    entire response as a single, valid HTML string. Please use <h1> for the overall meal
+    plan title, <h2> for each recipe title, an unordered list (<ul>) with <li> tags for
     ingredients, and an ordered list (<ol>) with <li> tags for instructions.
-     
+
     Ingredients:  {', '.join(ingredient_list)}
     """
 
     try:
-        response = gemini_model.generate_content(prompt)
-
-        recipes = response.text.strip()
-        return recipes
-
-
+        response = claude_client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = response.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1]
+        if text.endswith("```"):
+            text = text.rsplit("```", 1)[0]
+        return text.strip()
     except Exception as e:
-        logging.error(f"Error generating recipes with Gemini: {e}")
-        try:
-            # Attempt to get feedback if the error occurred after the API call
-             logging.error(f"Gemini prompt feedback: {response.prompt_feedback}")
-        except Exception:
-             pass # Ignore if feedback isn't available
+        logging.error(f"Error generating recipes with Claude: {e}")
         return "Error: Could not generate AI suggestion due to an internal error."
     
 def send_email(to_email, subject, body_html):
